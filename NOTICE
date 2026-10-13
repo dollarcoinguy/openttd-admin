@@ -1,0 +1,16 @@
+OpenTTD Admin
+Copyright (c) 2012-2026
+
+This project builds on and incorporates third-party software:
+
+1. Openttd-admin
+   - Original Author: Eric Renard (https://github.com/erenard/openttd-admin)
+   - Description: A Java library and client for the OpenTTD Admin Network Protocol.
+   - Modifications: Modified for compatibility with the forked OpenTTD version, JGR's Patchpack (jgrpp 0.73.4), modernized for Java 27 / Gradle 9.9, and updated protocol handling.
+
+2. RemoteGS
+   - Original Work: ServerGS by Leif Linse ("Zuu") (Copyright (c) 2012-2013 Leif Linse)
+   - Forked Work: RemoteGS by Ian Earle ("BasicBeluga") (Copyright (c) 2020-2024 Ian Earle, https://github.com/BasicBeluga/RemoteGS)
+   - Description: A GameScript providing Admin Port clients access to the OpenTTD GameScript API.
+   - Bundling & Modifications: Bundled under `src/squirrel/` and slightly modified for compatibility with modern OpenTTD versions and API bindings.
+   - License: GNU General Public License Version 2 (GPLv2). See `src/squirrel/LICENSE` for terms.

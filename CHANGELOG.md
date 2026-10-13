@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.0-jgrpp-0.73.4] - 2026-10-13
+
+### Added
+- Compatibility and protocol support for OpenTTD JGR Patch Pack (`jgrpp-0.73.4`).
+- Bundled RemoteGS GameScript (`src/squirrel/`) modified for compatibility with modern OpenTTD versions, including Squirrel bindings generation script (`gen_api_binding.py`), symbol tables (`symbols.nut`), and packaging tool (`make_tar.py`).
+- Java JSON model classes `RemoteGSJson` and `JsonStringParameter` for GameScript admin interaction via JSON payloads.
+- Constants `CompanyID`, `GSNews`, and `TestMode`.
+- `NOTICE` file providing third-party attribution for bundled RemoteGS and upstream Openttd-admin modified for `jgrpp-0.73.4`.
+- Git semantic versioning plugin (`git-sensitive-semantic-versioning`).
+- Badges and attribution documentation in `README.md`.
+
 ## [Pre-alpha] - 2026-10-13
 
 ### Added

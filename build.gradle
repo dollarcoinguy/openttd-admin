@@ -6,17 +6,27 @@
  * User Manual available at https://docs.gradle.org/9.7.1/userguide/building_java_projects.html
  */
 
+import io.github.andreabrighi.gradle.gitsemver.conventionalcommit.ConventionalCommit
+
+buildscript {
+	dependencies {
+		classpath("io.github.andreabrighi:conventional-commit-strategy-for-git-sensitive-semantic-versioning-gradle-plugin:2.0.24")
+	}
+}
 
 plugins {
 	// Apply the java-library plugin for API and implementation separation.
 	id 'java-library'
 	id("com.diffplug.spotless") version "8.10.4"
+	id("org.danilopianini.git-sensitive-semantic-versioning") version "7.0.25"
 }
 
 tasks.wrapper {
 	gradleVersion = "9.9.0-milestone-2"
 	distributionType = Wrapper.DistributionType.ALL
 }
+
+version = version + "-jgrpp-0.73.4"
 
 java {
 	toolchain {
@@ -46,6 +56,11 @@ spotless {
 
 		cleanthat()
 	}
+}
+
+gitSemVer {
+	maxVersionLength.set(20)
+	commitNameBasedUpdateStrategy(ConventionalCommit::semanticVersionUpdate)
 }
 
 repositories {
