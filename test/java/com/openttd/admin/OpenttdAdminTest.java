@@ -176,7 +176,7 @@ public class OpenttdAdminTest {
 		// ShowNews? 0 false, 1 true
 		setIndustryProductionCallArgs.add(true);
 		// News text
-		setIndustryProductionCallArgs.add(new JsonStringParameter("Deez nuts!"));
+		setIndustryProductionCallArgs.add(new JsonStringParameter("Production has surged!"));
 		networkAdminSender.gameScript(setIndustryProductionCall.toJsonString());
 	}
 

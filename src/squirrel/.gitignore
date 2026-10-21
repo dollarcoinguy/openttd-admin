@@ -1,0 +1,5 @@
+token
+*.tar
+/package_info.json
+.DS_Store
+.idea

@@ -1,22 +1,18 @@
-/*
- * This file is part of MinimalGS, which is a GameScript for OpenTTD
- * Copyright (C) 2012  Leif Linse
- *
- * MinimalGS is free software; you can redistribute it and/or modify it 
- * under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License
- *
- * MinimalGS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with MinimalGS; If not, see <http://www.gnu.org/licenses/> or
- * write to the Free Software Foundation, Inc., 51 Franklin Street, 
- * Fifth Floor, Boston, MA 02110-1301 USA.
- *
- */
+require("version.nut");
+require("cargo.nut");
+require("industry.nut");
+require("town.nut");
+require("company.nut");
+require("subsidies.nut")
+require("story.nut");
+require("strings.nut");
+
+/** Import other RemoteGS source code files **/
+require("symbol_version.nut"); // get GetSymbolsFileName()
+require(GetSymbolsFileName()); // get g_symbols
+require("admin_port.nut"); // get AdminPort class
+
+OWN_UNIQUEID <- 0;
 
 /** Import SuperLib for GameScript **/
 import("util.superlib", "SuperLib", 41);
@@ -24,151 +20,628 @@ Log <- SuperLib.Log;
 Helper <- SuperLib.Helper;
 Story <- SuperLib.Story;
 
-/** Import other source code files **/
-require("version.nut"); // get SELF_VERSION
-require("symbol_version.nut"); // get GetSymbolsFileName()
-require(GetSymbolsFileName()); // get g_symbols
-require("admin_port.nut"); // get AdminPort class
+// Import ToyLib
+import("Library.GSToyLib", "GSToyLib", 2);
+import("Library.SCPLib", "SCPLib", 45);
 
-OWN_UNIQUEID <- 0;
+enum Randomization {
+    NONE = 1,
+    INDUSTRY_DESC = 2,
+    INDUSTRY_ASC = 3,
+    FIXED_1 = 4,
+    FIXED_2 = 5,
+    FIXED_3 = 6,
+    FIXED_5 = 7,
+    FIXED_7 = 8,
+    RANGE_1_2 = 9,
+    RANGE_1_3 = 10,
+    RANGE_2_3 = 11,
+    RANGE_3_5 = 12,
+    RANGE_3_7 = 13,
+    DESCENDING = 14,
+    ASCENDING = 15,
+};
 
-class MainClass extends GSController 
-{
-	_loaded_data = null;
-	_loaded_from_version = null;
-	_init_done = null;
-
-	/*
-	 * This method is called when your GS is constructed.
-	 * It is recommended to only do basic initialization of member variables
-	 * here.
-	 * Many API functions are unavailable from the constructor. Instead do
-	 * or call most of your initialization code from MainClass::Init.
-	 */
-	constructor()
-	{
-		this._init_done = false;
-	}
+enum InitError {
+    NONE,
+    CARGO_LIST,
+    INDUSTRY_LIST,
+    TOWN_NUMBER,
+    TOWN_GROWTH_RATE,
 }
 
-/*
- * This method is called by OpenTTD after the constructor, and after calling
- * Load() in case the game was loaded from a save game. You should never
- * return back from this method. (if you do, the script will crash)
- *
- * Start() contains of two main parts. First initialization (which is
- * located in Init), and then the main loop.
- */
+class MainClass extends GSController
+{
+    companies = null;
+    towns = null;
+    current_date = null;
+    current_week = null;
+    current_month = null;
+    current_year = null;
+    gs_init_done = null;
+    load_saved_data = null;
+    current_save_version = null;
+    actual_town_info_mode = null;
+    toy_lib = null;
+    story_editor = null;
+
+    constructor() {
+        this.companies = [];
+        this.towns = [];
+        this.current_date = 0;
+        this.current_week = 0;
+        this.current_month = 0;
+        this.current_year = 0;
+        this.gs_init_done = false;
+        this.current_save_version = SELF_MAJORVERSION;    // Ensures compatibility between revisions
+        this.load_saved_data = false;
+        this.actual_town_info_mode = 0;
+        this.toy_lib = null;
+        this.story_editor = null;
+        ::TownDataTable <- {};
+        ::CompanyDataTable <- {};
+        ::SettingsTable <- {};
+    }
+}
+
 function MainClass::Start()
 {
-	// Some OpenTTD versions are affected by a bug where all API methods
-	// that create things in the game world during world generation will
-	// return object id 0 even if the created object has a different ID. 
-	// In that case, the easiest workaround is to delay Init until the 
-	// game has started.
-	if (Helper.HasWorldGenBug()) GSController.Sleep(1);
+    // Wait random number of ticks (less than one day) based on system time to ensure random number seed
+    local sysdate = GSDate.GetSystemTime() % 70 + 1;
+    this.Sleep(sysdate);
 
-	if(!this.Init()) return;
+    // Initializing the script
+    local start_tick = GSController.GetTick();
 
-	// Wait for the game to start (or more correctly, tell OpenTTD to not
-	// execute our GS further in world generation)
-	GSController.Sleep(1);
+    // Read the openttd.cfg Town Growth Rate setting first.
+    // If the map is set to disallow town growth at all, this script
+    // won't do anything further.
+    if (GSGameSettings.IsValid("town_growth_rate")) {
+        if (! GSGameSettings.GetValue("town_growth_rate") ) {
+            GSLog.Error("You must set town growth in advanced setting to something other than None. This script is now exiting!");
+            this.story_editor = StoryEditor();
+            this.story_editor.CreateStoryBook([], 0, InitError.TOWN_GROWTH_RATE);
+            return;
+        }
+    }
 
-	// Game has now started and if it is a single player game,
-	// company 0 exist and is the human company.
+    GSLog.Info("GameScript Peaks and Troughs loaded");
+	
+	local preset_setting = MainClass.GetSetting("pt_preset");
+	local time_rates = [];
+	switch(preset_setting)
+	{
+		case 1:
+			GSLog.Info("Preset: Hyper peak");
+			time_rates = [-1.69, -2.80, -5.32, -5.32, -5.32, -2.42, -0.97, 0.00, 1.70, 0.64, 0.15, 0.00, 0.00, 0.00, 0.00, 0.20, 0.68, 1.14, 1.32, 1.14, 0.38, 0.00, -1.00, -1.30];
+			break;
+		case 2:
+			GSLog.Info("Preset: Equal peaks");
+			time_rates = [-1.44, -2.58, -5.39, -5.39, -5.39, -2.59, -1.15, 0.79, 1.52, 0.52, 0.07, -0.07, -0.07, -0.07, -0.07, 0.16, 0.37, 0.97, 1.39, 1.21, 0.49, 0.14, -0.75, -1.05];
+			break;
+		case 3:
+			GSLog.Info("Preset: Japan");
+			time_rates = [-0.83, -2.07, -5.63, -5.63, -5.63, -2.32, -0.43, 1.13, 1.86, 0.30, -0.31, -0.31, -0.31, -0.31, -0.31, -0.31, 0.07, 0.61, 1.01, 0.87, 0.64, 0.42, 0.15, -0.17];
+			break;
+		case 4:
+			GSLog.Info("Preset: UK");
+			time_rates = [-4.76, -6.03, -6.41, -6.44, -5.31, -3.24, -1.41, 0.26, 1.72, 0.87, 0.63, 0.63, 0.63, 0.55, 0.57, 1.61, 0.91, 0.76, 0.56, -0.04, -0.76, -1.44, -1.85, -2.28];
+			break;
+		case 5:
+			GSLog.Info("Preset: No peaks");
+			time_rates = [-5.28, -5.28, -5.28, -5.28, -5.28, -5.28, -5.28, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, 0.72, -5.28, -5.28];
+			break;
+		default:
+			GSLog.Error("Failed to recognise preset");
+	}
 
-	// Warn if script is used in non-MP games
+	local base_rates = MainClass.GetSetting("pt_base");
+	GSLog.Info("Offset: "+base_rates);
+	
+	local logs = MainClass.GetSetting("pt_log_level");
+
+    GSGame.Pause();
+    Log.Info("Script initialisation...", Log.LVL_INFO);
+    local init_error = this.Init();
+    GSGame.Unpause();
+
+    local setup_duration = GSController.GetTick() - start_tick;
+    Log.Info("Game setup done.", Log.LVL_INFO);
+    Log.Info("Setup took " + setup_duration + " ticks.", Log.LVL_DEBUG);
+    Log.Info("Happy playing !", Log.LVL_INFO);
+
+    // Wait for the game to start
+    GSController.Sleep(1);
+
+    // Warn if RemoteGS script is used in non-MP games
 	if (!GSGame.IsMultiplayer()) {
 		GSGoal.Question(OWN_UNIQUEID, GSCompany.COMPANY_INVALID, GSText(GSText.STR_NOT_MP_WARNING), GSGoal.QT_WARNING, GSGoal.BUTTON_OK);
 		Log.Warning("The game is not a multiplayer game. The admin port control will therefor not function");
 	}
 
-	// Main Game Script loop
-	while (true) {
-		// Handle incoming messages from OpenTTD
-		this.HandleEvents();
+    // Create and fill StoryBook. This can't be done before OTTD is ready.
+    this.story_editor = StoryEditor();
+    this.story_editor.CreateStoryBook(this.companies, this.towns.len(), init_error);
 
-		// Sleep a bit (but not too long, so that incoming requests are
-		// handled quickly)
-		GSController.Sleep(10);
+    if (!this.gs_init_done) {
+        GSLog.Error("Game initialisation failed. This script is now exiting!");
+        return;
+    }
+	
+	if("GetHour" in GSDate) {
+		    // Main loop
+		GSLog.Info("Correct version of JGR loaded");
+        local past_system_time = GSDate.GetSystemTime();
+
+		while (true) {
+
+			local loop_start_tick = GSController.GetTick();
+			
+			//get time
+			local tick_scale = GSDate.GetCurrentScaledDateTicks();
+			local current_time = GSDate.GetHour(tick_scale)
+			//failsafe
+			if(current_time >= 24) {
+				if (logs != 1) {
+					GSLog.Warning("GetHour returned "+current_time);	
+					GSLog.Info("Hours set to 0");
+				}
+				current_time = 0
+			}
+			
+			local prod_rate = (time_rates[current_time]+base_rates)*10
+			
+			if (prod_rate > 80) {
+				if (logs != 1) {
+					GSLog.Info("Production rate capped at 8");
+				}
+				prod_rate = 80;
+			}
+			if (prod_rate < -80) {
+				if (logs != 1) {
+					GSLog.Info("Production rate capped at -8");
+				}
+				prod_rate = -80;
+			}
+			
+			if (logs == 3) {
+				GSLog.Info("Time is "+current_time);
+				GSLog.Info("Production rate set to "+prod_rate);
+			}
+			
+			GSGameSettings.SetValue("economy.town_cargo_scale_factor", prod_rate.tointeger());
+			
+			/*
+			 * When meshing with a different GS, replace the two lines below with whatever is in the
+			 * while(true) loop in MainClass::Start()
+			 * As it's written here loops with a frequency of 10 minutes
+			 */
+			local ticks_used = GSController.GetTick() - loop_start_tick;
+			this.SleepAndHandleEvents(max(1, 10 * 74 - ticks_used));
+
+
+            local town_info_mode = GSController.GetSetting("town_info_mode");
+            if (this.actual_town_info_mode != town_info_mode) {
+                this.actual_town_info_mode = town_info_mode;
+                foreach (town in this.towns) {
+                    town.UpdateTownText(this.actual_town_info_mode);
+                }
+                continue;
+            }
+
+            local system_time = GSDate.GetSystemTime();
+            if (1 == this.actual_town_info_mode && system_time - past_system_time > 3) {
+                past_system_time = system_time;
+
+                foreach (town in this.towns) {
+                    town.UpdateTownText(this.actual_town_info_mode);
+                }
+            }
+
+            this.HandleEvents();
+            this.ManageTowns();
+		}
+	} else {
+		GSLog.Error("Please update to a newer version of JGR patch pack");
 	}
 }
 
-/*
- * This method is called during the initialization of your Game Script.
- * As long as you never call Sleep() and the user got a new enough OpenTTD
- * version, all initialization happens while the world generation screen
- * is shown. This means that even in single player, company 0 doesn't yet
- * exist. The benefit of doing initialization in world gen is that commands
- * that alter the game world are much cheaper before the game starts.
- */
 function MainClass::Init()
 {
-	if (this._loaded_data != null) {
-		// Copy loaded data from this._loaded_data to this.*
-		// or do whatever with the loaded data
-	} else {
-		// construct goals etc.
-	}
+    this.toy_lib = GSToyLib(null); // Init ToyLib;
 
-	AdminPort.Initialize();
+    // Check game settings
+    GSGameSettings.SetValue("economy.town_growth_rate", 2);
+    GSGameSettings.SetValue("economy.fund_buildings", 0);
+    ::SettingsTable.wallclock_timekeeping <- GSGameSettings.GetValue("economy.timekeeping_units");
 
-	// Indicate that all data structures has been initialized/restored.
-	this._init_done = true;
-	this._loaded_data = null; // the loaded data has no more use now after that _init_done is true.
+    if (!this.load_saved_data) { // Disallow changing these in a running game
+        ::SettingsTable.use_town_sign <- GSController.GetSetting("use_town_sign");
+        ::SettingsTable.randomization <- GSController.GetSetting("cargo_randomization");
+        ::SettingsTable.display_cargo <- GSController.GetSetting("display_cargo");
+        ::SettingsTable.cargo_6_category <- GSController.GetSetting("cargo_6_category");
+        ::SettingsTable.category_min_pop <- [GSController.GetSetting("category_1_min_pop"),
+                                             GSController.GetSetting("category_2_min_pop"),
+                                             GSController.GetSetting("category_3_min_pop"),
+                                             GSController.GetSetting("category_4_min_pop"),
+                                             GSController.GetSetting("category_5_min_pop"),
+                                             GSController.GetSetting("category_6_min_pop")];
+    }
 
-	return true;
+    // Set current date
+    this.current_date = this.current_week = GSDate.GetCurrentDate();
+    this.current_month = GSDate.GetMonth(this.current_date);
+    this.current_year = GSDate.GetYear(this.current_date);
+
+    if (::SettingsTable.randomization == Randomization.INDUSTRY_DESC
+     || ::SettingsTable.randomization == Randomization.INDUSTRY_ASC) {
+        if (!InitIndustryLists())
+            return InitError.INDUSTRY_LIST;
+    }
+    else {
+        // Initialize cargo lists and variables
+        if (!InitCargoLists())
+            return InitError.CARGO_LIST;
+    }
+
+    /* Check whether saved data are in the current save
+     * format.
+     */
+    if (!this.load_saved_data) {
+        Helper.ClearAllSigns();
+    }
+
+    // Create company list
+    Log.Info("Creating company list ...", Log.LVL_INFO);
+    this.companies = this.CreateCompanyList();
+
+    // Create the towns list
+    Log.Info("Creating town list ... (can take a while on large maps)", Log.LVL_INFO);
+    this.towns = this.CreateTownList();
+    if (this.towns.len() > SELF_MAX_TOWNS)
+        return InitError.TOWN_NUMBER;
+    Log.Info("Setup " + this.towns.len() + " towns", Log.LVL_INFO);
+
+    // Run industry stabilizer
+    Log.Info("Prospecting raw industries ... (can take a while on large maps)", Log.LVL_INFO);
+    ProspectRawIndustry();
+
+    // Ending initialization
+    this.gs_init_done = true;
+
+    AdminPort.Initialize();
+
+    return InitError.NONE;
 }
 
-/*
- * This method handles incoming events from OpenTTD.
+/* Sleep for the given number of ticks, but wake up every 10 ticks
+ * to run HandleEvents() so remoteGS can receive admin gamescript
+ * events without waiting for the whole loop period.
  */
+function MainClass::SleepAndHandleEvents(ticks)
+{
+    local remaining = ticks;
+    while (remaining > 0) {
+        local slice = min(10, remaining);
+        GSController.Sleep(slice);
+        this.HandleEvents();
+        remaining -= slice;
+    }
+}
+
 function MainClass::HandleEvents()
 {
-	if(GSEventController.IsEventWaiting()) {
-		local ev = GSEventController.GetNextEvent();
-		if (ev == null) return;
+    while (GSEventController.IsEventWaiting()) {
+        local event = GSEventController.GetNextEvent();
 
-		// Allow admin port to look at all events
-		AdminPort.ReceiveEvent(ev);
-	}
+        if (event == null)
+            return;
+
+        // Allow admin port to look at all events
+		AdminPort.ReceiveEvent(event);
+
+        switch (event.GetEventType()) {
+        // On town founding, add a new GoalTown instance
+        case GSEvent.ET_TOWN_FOUNDED:
+            event = GSEventTownFounded.Convert(event);
+            local town_id = event.GetTownID();
+            if (GSTown.IsValidTown(town_id)) this.UpdateTownList(town_id);
+            break;
+
+        case GSEvent.ET_COMPANY_NEW:
+        case GSEvent.ET_COMPANY_BANKRUPT:
+        case GSEvent.ET_COMPANY_MERGER:
+            Log.Info("A company was created/bankrupt/merged => update company list", Log.LVL_INFO);
+            this.UpdateCompanyList();
+            break;
+
+        default: break;
+        }
+    }
 }
 
-/*
- * This method is called by OpenTTD when an (auto)-save occurs. You should
- * return a table which can contain nested tables, arrays of integers,
- * strings and booleans. Null values can also be stored. Class instances and
- * floating point values cannot be stored by OpenTTD.
- */
 function MainClass::Save()
 {
-	Log.Info("Saving data to savegame", Log.LVL_INFO);
+    Log.Info("Saving data...", Log.LVL_INFO);
+    local save_table = {};
 
-	// In case (auto-)save happens before we have initialized all data,
-	// save the raw _loaded_data if available or an empty table.
-	if (!this._init_done) return this._loaded_data != null ? this._loaded_data : {};
+    /* If the script isn't yet initialized, we can't retrieve data
+     * from GoalTown instances. Thus, simply use the original
+     * loaded table. Otherwise we build the table with town data.
+     */
+    save_table.company_data_table <- {};
+    save_table.town_data_table <- {};
+    if (!this.gs_init_done) {
+        save_table.town_data_table <- ::TownDataTable;
+    } else {
+        // Save permanent settings (allows changing them in scenario editor)
+        save_table.use_town_sign <- ::SettingsTable.use_town_sign;
+        save_table.randomization <- ::SettingsTable.randomization;
+        save_table.display_cargo <- ::SettingsTable.display_cargo;
+        save_table.cargo_6_category <- ::SettingsTable.cargo_6_category;
+        save_table.category_min_pop <- ::SettingsTable.category_min_pop;
 
-	return { 
-		some_data = null,
-		//some_other_data = this._some_variable,
-	};
+        foreach (company in this.companies)
+        {
+            save_table.company_data_table[company.id] <- company.SavingCompanyData();
+        }
+
+        local start_opcodes = GSController.GetOpsTillSuspend();
+        foreach (i, town in this.towns)
+        {
+            save_table.town_data_table[town.id] <- town.SavingTownData();
+        }
+        Log.Info("Opcodes per saved town = " + ((start_opcodes - GSController.GetOpsTillSuspend()) / this.towns.len()), Log.LVL_DEBUG);
+        // Also store a savegame version flag
+        save_table.save_version <- this.current_save_version;
+    }
+
+    return save_table;
 }
 
-/*
- * When a game is loaded, OpenTTD will call this method and pass you the
- * table that you sent to OpenTTD in Save().
- */
-function MainClass::Load(version, tbl)
+function MainClass::Load(version, saved_data)
 {
-	Log.Info("Loading data from savegame made with version " + version + " of the game script", Log.LVL_INFO);
+    Log.Info("Loading data...", Log.LVL_INFO);
+    // Loading town data. Only load data if the savegame version matches.
+    if ((saved_data.rawin("save_version") && saved_data.save_version == this.current_save_version)) {
+        this.load_saved_data = true;
+        ::SettingsTable.use_town_sign <- saved_data.use_town_sign;
+        ::SettingsTable.randomization <- saved_data.randomization;
+        ::SettingsTable.display_cargo <- saved_data.display_cargo;
+        ::SettingsTable.cargo_6_category <- saved_data.cargo_6_category;
+        ::SettingsTable.category_min_pop <- saved_data.category_min_pop;
 
-	// Store a copy of the table from the save game
-	// but do not process the loaded data yet. Wait with that to Init
-	// so that OpenTTD doesn't kick us for taking too long to load.
-	this._loaded_data = {}
-   	foreach(key, val in tbl) {
-		this._loaded_data.rawset(key, val);
-	}
+        foreach (companyid, company_data in saved_data.company_data_table) {
+            ::CompanyDataTable[companyid] <- company_data;
+        }
 
-	this._loaded_from_version = version;
+        foreach (townid, town_data in saved_data.town_data_table) {
+            ::TownDataTable[townid] <- town_data;
+        }
+    }
+    else {
+        Log.Info("Save data format doesn't match with current version (saved " + saved_data.save_version + " vs current " + this.current_save_version + "). Resetting.", Log.LVL_INFO);
+    }
+}
+
+function MainClass::UpdateCompanyList()
+{
+    for(local c = GSCompany.COMPANY_FIRST; c <= GSCompany.COMPANY_LAST; c++)
+    {
+        local existing = null;
+        local existing_idx = 0;
+        foreach(index, company in this.companies)
+        {
+            if(company.id == c)
+            {
+                existing = company;
+                existing_idx = index;
+                break;
+            }
+        }
+
+        if(GSCompany.ResolveCompanyID(c) == GSCompany.COMPANY_INVALID)
+        {
+            if(existing != null) {
+                existing.RemoveGUIGoals();
+                this.companies.remove(existing_idx);
+            }
+
+            continue;
+        }
+
+        // If the company can be resolved and exists => do anything
+        if(existing != null) continue;
+
+        // Initialize new company
+        local company = Company(c, false);
+        this.companies.append(company);
+
+        if (this.story_editor != null)
+            this.story_editor.CreateNewCompanyStoryBook(company);
+    }
+}
+
+function MainClass::CreateCompanyList()
+{
+    this.companies = [];
+
+    // Create company list from saved data
+    if (this.load_saved_data && ::CompanyDataTable != null) {
+        foreach (company_id, company_data in ::CompanyDataTable)
+        {
+            this.companies.append(Company(company_id, true));
+        }
+    }
+
+    // Now we can free ::CompanyDataTable
+    ::CompanyDataTable = null;
+
+    // Update company list for created/bankrupted/merged
+    this.UpdateCompanyList();
+
+    return companies;
+}
+
+/* Make a squirrel array of GoalTown instances (towns_array). For each
+ * town, an instance of GoalTown is created to store the data related
+ * to that town.
+ */
+function MainClass::CreateTownList()
+{
+    // In multiplayer, pause level cannot be changed, so monthly update is forced at start to finish initialization
+    // In single player, if it is not set, temporarily allow all non-construction actions during pause
+    local pause_level = GSGameSettings.GetValue("construction.command_pause_level");
+    if (GSGame.IsMultiplayer() && pause_level < 1)
+        this.current_month -= 1;
+    else if (pause_level < 1)
+        GSGameSettings.SetValue("construction.command_pause_level", 1);
+
+    // Create list of cargos/industries near each town
+    local near_town;
+    if (::SettingsTable.randomization == Randomization.INDUSTRY_DESC ||
+        ::SettingsTable.randomization == Randomization.INDUSTRY_ASC)
+        near_town = GetTownsNearbyIndustryPerCategory();
+    else
+        near_town = GetTownsNearbyCargoPerCategory();
+
+    local towns_list = GSTownList();
+    local towns_array = [];
+
+    local min_transport = GSController.GetSetting("limit_min_transport");
+    local near_cargo_probability = GSController.GetSetting("near_cargo_probability");
+    foreach (t, _ in towns_list) {
+        towns_array.append(GoalTown(t, this.load_saved_data, min_transport, near_town[t], near_cargo_probability));
+    }
+
+    // Reset to previous settings
+    GSGameSettings.SetValue("construction.command_pause_level", pause_level);
+
+    // Now we can free ::TownDataTable
+    ::TownDataTable = null;
+
+    return towns_array;
+}
+
+/* Function called on town creation. We need to add a now GoalTown
+ * instance to the this.towns array. The array order doesn't matter,
+ * since we never use the array index, only its values.
+ */
+function MainClass::UpdateTownList(town_id)
+{
+    // Create list of cargos/industries near each town
+    local near_town;
+    if (::SettingsTable.randomization == Randomization.INDUSTRY_DESC ||
+        ::SettingsTable.randomization == Randomization.INDUSTRY_ASC)
+        near_town = GetTownsNearbyIndustryPerCategory();
+    else
+        near_town = GetTownsNearbyCargoPerCategory();
+
+    local min_transport = GSController.GetSetting("limit_min_transport");
+    local near_cargo_probability = GSController.GetSetting("near_cargo_probability");
+    this.towns.append(GoalTown(town_id, false, min_transport, near_town[town_id], near_cargo_probability));
+    Log.Info("New town founded: "+GSTown.GetName(town_id)+" (id: "+town_id+")", Log.LVL_DEBUG);
+}
+
+function MainClass::DailyManageTownPopulation()
+{
+    foreach (town in this.towns) {
+        local new_population = GSTown.GetPopulation(town.id);
+        if (new_population > town.max_population) {
+            foreach (company in companies) {
+                if (company.id == town.contributor) {
+                    company.AddPoints(new_population - town.max_population);
+                    Log.Info(GSTown.GetName(town.id)
+                             + " increased population by " + (new_population - town.max_population)
+                             + " which was added to " + GSCompany.GetName(company.id), Log.LVL_DEBUG);
+                }
+            }
+
+            town.max_population = new_population;
+        }
+    }
+}
+
+/* Function called periodically (each 74 ticks) to manage
+ * towns and other stuff.
+ */
+function MainClass::ManageTowns()
+{
+    // Run the daily functions
+    local date = GSDate.GetCurrentDate();
+    local diff_date = date - this.current_date;
+    if (diff_date == 0) {
+        return;
+    } else {
+        GSToyLib.Check();
+        this.story_editor.CheckParameters(this.companies);
+        DailyManageTownPopulation();
+
+        this.current_date = date;
+    }
+
+    // Run the monthly functions
+    local month = GSDate.GetMonth(date);
+    local diff_month = month - this.current_month;
+    if (diff_month == 0) {
+        return;
+    } else {
+        local month_tick = GSController.GetTick();
+        Log.Info("Starting Monthly Updates...", Log.LVL_INFO);
+
+        local eternal_love = GSController.GetSetting("eternal_love");
+        local eternal_love_rating = 0;
+        switch (eternal_love) {
+            case(1): // Outstanding
+                eternal_love_rating = 1000;
+                break;
+            case(2): // Good
+                eternal_love_rating = 400;
+                break;
+            case(3): // Poor
+                eternal_love_rating = 0;
+                break;
+        }
+
+        local threshold_setting = GSController.GetSetting("town_size_threshold");
+        local min_transport = GSController.GetSetting("limit_min_transport");
+        foreach (town in this.towns) {
+            town.ManageTownLimiting(threshold_setting, min_transport);
+            town.MonthlyManageTown();
+            if (this.actual_town_info_mode > 1) {
+                town.UpdateTownText(this.actual_town_info_mode);
+            }
+
+            if (eternal_love > 0) {
+                town.EternalLove(eternal_love_rating);
+            }
+        }
+
+        foreach (company in this.companies) {
+            company.MonthlyUpdateGUIGoals(this.towns);
+        }
+
+        this.current_month = month;
+        local month_tick_duration = GSController.GetTick() - month_tick;
+        Log.Info("Monthly Update took "+month_tick_duration+" ticks.", Log.LVL_DEBUG);
+    }
+
+    // Run the yearly functions - Nothing to do for now, so we leave it out
+    local year = GSDate.GetYear(date);
+    local diff_year = year - this.current_year;
+    if ( diff_year == 0)
+        return;
+    else
+    {
+        Log.Info("Starting Yearly Updates...", Log.LVL_INFO);
+
+        ProspectRawIndustry();
+        CreateSubsidies(towns, companies);
+
+        this.current_year = year;
+    }
+}
+
+function Modulo(num, divisor) {
+    return (num - divisor * (num / divisor));
 }

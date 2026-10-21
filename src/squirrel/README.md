@@ -1,8 +1,14 @@
 # RemoteGS
 
-Original Author: Zuu
-Fork Author: Ian Earle
-License: GPL 2
+![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![License](https://img.shields.io/badge/license-GPL--2.0-green.svg)
+![OpenTTD GS API](https://img.shields.io/badge/OpenTTD%20GS%20API-14-orange.svg)
+
+Original Author: Zuu  
+Fork Author: Ian Earle  
+License: GPL 2  
+
+See [CHANGELOG.md](CHANGELOG.md) for recent release notes and changelog details. Versioning has restarted at 1.0 to clearly identify the split from upstream RemoteGS numbering conventions.
 
 Index:
   1. When is this script useful? 
@@ -13,6 +19,7 @@ Index:
      * 2.4 - Events
   3. Available API methods
   4. Known issues
+  5. Changelog
 
 
 ## 1. When is this script useful?
@@ -244,3 +251,8 @@ network delay.
   to set Admin Update Frequency to ADMIN_FREQUENCY_AUTOMATIC. This
   is not a bug in OpenTTD but more of a pitfall that is mentioned 
   here so that you don't forget to do this.
+
+
+## 5. Changelog
+
+Please refer to [CHANGELOG.md](CHANGELOG.md) for details on changes in each release.

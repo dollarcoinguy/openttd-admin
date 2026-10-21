@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0-jgrpp-0.73.4] - 2026-10-20
+
+### Added
+- Integrated Renewed Village Growth (RVG bigy-fork) and Peaks & Troughs gameplay mechanics with RemoteGS Admin Port capabilities into bundled GameScript (`src/squirrel/`).
+- Modular GameScript subsystems for cargo management, industry chains, town growth rules, company statistics, dynamic subsidies, and story book pages.
+- Industry NewGRF compatibility sets including FIRS, XIS, AXIS, ITI, OTIS, PIRS, Real Industries, and Default Industries Plus.
+- Multi-language localization support across 11 languages (Czech, French, Galician, German, Japanese, Polish, Russian, Simplified Chinese, Slovak, Traditional Chinese, Ukrainian).
+- Configurable settings for town growth requirements, cargo randomization, difficulty scaling factor, town signs, and local authority rating ("Eternal Love").
+- Patched changes to cargos in FIRS 5 and ITI.
+
 ## [0.1.0-jgrpp-0.73.4] - 2026-10-13
 
 ### Added
